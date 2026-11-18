@@ -1,0 +1,49 @@
+# Render Blueprint — "New + > Blueprint" দিয়ে এই repo কানেক্ট করলে সব একসাথে তৈরি হবে।
+#
+# খরচ (Hobby workspace): Web Starter $7 + Postgres basic-256mb $6 + Key Value free $0
+#                         ≈ $13/মাস (storage ও bandwidth আলাদা, সাধারণত সামান্য)
+services:
+  - type: web
+    name: freefire-bot
+    runtime: python
+    plan: starter            # Starter = কখনো ঘুমায় না (Free প্ল্যান ১৫ মিনিটে sleep হয় — বটের জন্য অচল)
+    region: singapore        # বাংলাদেশের সবচেয়ে কাছের
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: BOT_TOKEN
+        sync: false          # Render dashboard-এ নিজে বসাবেন
+      - key: ADMIN_IDS
+        sync: false
+      - key: SUPPORT_USERNAME
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: freefire-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: freefire-redis
+          property: connectionString
+      - key: SECRET_ENCRYPTION_KEY
+        generateValue: true  # Render নিজে random মান বানাবে — এরপর আর বদলাবেন না!
+
+  - type: keyvalue
+    name: freefire-redis
+    plan: free
+    region: singapore
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []          # শুধু Render-এর ভেতর থেকে কানেক্ট করা যাবে
+
+databases:
+  - name: freefire-db
+    plan: basic-256mb        # Free Postgres ৩০ দিনে মুছে যায় — টাকা-পয়সার ডেটার জন্য অচল
+    region: singapore
+    databaseName: freefire
+    user: freefire
+    ipAllowList: []
