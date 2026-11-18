@@ -199,7 +199,7 @@ async def place_order(
 async def _dispatch_to_provider(session: AsyncSession, order: Order, provider: ApiProvider, service_id: str) -> PlaceResult:
     client = get_provider_client(provider)
     try:
-        api_order_id = await client.add_order(service_id, order.player_id, quantity=1)
+        api_order_id = await client.add_order(service_id, order.player_id, quantity=1, idempotency_key=order.order_code)
 
     except ApiRejectedError as exc:
         logger.warning("Provider rejected %s: %s", order.order_code, exc)

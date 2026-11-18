@@ -25,9 +25,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import ADMIN_IDS, BOT_TOKEN, PUBLIC_BASE_URL, REDIS_URL, WEBHOOK_SECRET
 from database.database import SessionLocal, dispose_db, init_db
-from handlers import admin, deposit, fallback, nav, orders, referral, user
+from handlers import admin, admin_import, deposit, fallback, nav, orders, referral, user
 from middlewares import BanMiddleware
 from services.auto_deposit import reconcile_pending_intents
+from services.catalog import price_sync_job
 from services.notify import notify_admins
 from services.order_sync import sync_all_processing_orders
 from utils.crypto import encryption_enabled
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 WEBHOOK_PATH = "/webhook"
 PORT = os.getenv("PORT")
 JOB_INTERVAL_SECONDS = 60
+PRICE_SYNC_MINUTES = 15
 
 _last_admin_error_alert = 0.0
 
@@ -73,6 +75,7 @@ def create_dispatcher(storage: BaseStorage) -> Dispatcher:
 
     dp.include_router(nav.router)
     dp.include_router(admin.router)
+    dp.include_router(admin_import.router)
     dp.include_router(deposit.router)
     dp.include_router(orders.router)
     dp.include_router(referral.router)
@@ -117,6 +120,10 @@ def start_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler.add_job(
         reconcile_pending_intents, "interval", seconds=JOB_INTERVAL_SECONDS,
         args=[bot, SessionLocal], id="payment_reconcile", max_instances=1, coalesce=True,
+    )
+    scheduler.add_job(
+        price_sync_job, "interval", minutes=PRICE_SYNC_MINUTES,
+        args=[bot, SessionLocal], id="price_sync", max_instances=1, coalesce=True,
     )
     scheduler.start()
     return scheduler

@@ -129,3 +129,41 @@ class DatabaseUrlTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PricingTests(unittest.TestCase):
+    def setUp(self):
+        from services import pricing
+        self.p = pricing
+
+    def test_parse_markup(self):
+        self.assertEqual(self.p.parse_markup("10%"), ("PERCENT", Decimal("10")))
+        self.assertEqual(self.p.parse_markup(" ১৫ % "), ("PERCENT", Decimal("15")))
+        self.assertEqual(self.p.parse_markup("15"), ("FIXED", Decimal("15")))
+        self.assertEqual(self.p.parse_markup("৳20"), ("FIXED", Decimal("20")))
+        self.assertEqual(self.p.parse_markup("12.5tk"), ("FIXED", Decimal("12.5")))
+        for bad in ("-5", "abc", "", None, "10%%", "5000%"):
+            self.assertIsNone(self.p.parse_markup(bad), bad)
+
+    def test_parse_rate(self):
+        self.assertEqual(self.p.parse_rate("125"), Decimal("125"))
+        self.assertEqual(self.p.parse_rate("124.5"), Decimal("124.5"))
+        for bad in ("0", "-1", "nan", "inf", "x", None):
+            self.assertIsNone(self.p.parse_rate(bad), bad)
+
+    def test_sell_price_rounds_up_never_below_cost(self):
+        # cost $0.88 × 125 = ৳110.00 ; +10% = 121.00
+        self.assertEqual(self.p.compute_sell_price("0.88", "125", "PERCENT", "10"), Decimal("121"))
+        # fixed ৳15 on 110 = 125
+        self.assertEqual(self.p.compute_sell_price("0.88", "125", "FIXED", "15"), Decimal("125"))
+        # 0.8765 × 125 = 109.5625 -> +0 profit must still round UP (110), never down
+        self.assertEqual(self.p.compute_sell_price("0.8765", "125", "FIXED", "0"), Decimal("110"))
+        self.assertGreaterEqual(self.p.compute_sell_price("0.8765", "125", "PERCENT", "0"), Decimal("109.5625"))
+
+    def test_labels(self):
+        self.assertEqual(self.p.extract_amount_label("Freefire BD 100 Diamond"), "100")
+        self.assertEqual(self.p.extract_amount_label("Weekly Membership"), "Weekly Membership")
+        self.assertEqual(self.p.extract_amount_label("1,060 Diamonds"), "1060")
+        self.assertEqual(self.p.markup_label("PERCENT", "10.00"), "10%")
+        self.assertEqual(self.p.markup_label("FIXED", "15"), "৳15")
+        self.assertEqual(self.p.markup_label(None, None), "—")

@@ -301,7 +301,19 @@ async def cb_admin_pkg_detail(call: CallbackQuery):
     )
     if pkg.api_provider_id and pkg.api_service_id:
         text += f"⚡ Delivery: Automatic\n🔌 Provider ID: {pkg.api_provider_id}\n🔢 Service ID: {esc(pkg.api_service_id)}\n"
-        if pkg.cost_price:
+        if pkg.auto_price and pkg.src_cost is not None:
+            from services.catalog import get_rate
+            from services.pricing import cost_in_bdt, markup_label
+            async with get_session() as session:
+                provider = (await session.execute(select(ApiProvider).where(ApiProvider.id == pkg.api_provider_id))).scalar_one_or_none()
+                rate = await get_rate(session, provider.currency if provider else "USD")
+            cur = esc(provider.currency if provider else "USD")
+            text += f"💵 Provider Cost: {Decimal(str(pkg.src_cost)).normalize():f} {cur}"
+            if rate:
+                cost_bdt = cost_in_bdt(pkg.src_cost, rate)
+                text += f" ≈ {fmt_money(cost_bdt)}\n📈 লাভ: {fmt_money(to_money(pkg.price) - cost_bdt)} ({markup_label(pkg.markup_type, pkg.markup_value)})"
+            text += "\n🔄 দাম অটো-সিঙ্ক চালু\n"
+        elif pkg.cost_price:
             profit = to_money(pkg.price) - to_money(pkg.cost_price)
             text += f"💵 Cost: {fmt_money(pkg.cost_price)} (লাভ: {fmt_money(profit)})\n"
     else:

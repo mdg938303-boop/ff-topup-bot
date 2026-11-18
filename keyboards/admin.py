@@ -76,6 +76,11 @@ def admin_providers_kb(providers) -> InlineKeyboardMarkup:
 
 def admin_provider_detail_kb(provider) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
+    is_epinby = provider.provider_type == "EPINBY"
+    if is_epinby:
+        b.button(text="📥 Import Packages (catalog থেকে)", callback_data=f"adm:imp:{provider.id}")
+        b.button(text="🔄 Sync Prices Now", callback_data=f"adm:syncnow:{provider.id}")
+        b.button(text="💱 Exchange Rate", callback_data=f"adm:rate:{provider.id}")
     b.button(text="🧪 Test Connection", callback_data=f"adm:prov_test:{provider.id}")
     if provider.is_active:
         b.button(text="🔴 Disable", callback_data=f"adm:prov_toggle:{provider.id}")
@@ -83,7 +88,7 @@ def admin_provider_detail_kb(provider) -> InlineKeyboardMarkup:
         b.button(text="🟢 Enable", callback_data=f"adm:prov_toggle:{provider.id}")
     b.button(text="🗑️ Delete", callback_data=f"adm:prov_del:{provider.id}")
     b.button(text="⬅️ Back", callback_data="adm:providers")
-    b.adjust(1, 2, 1)
+    b.adjust(*([1, 2] if is_epinby else []), 1, 2, 1)
     return b.as_markup()
 
 

@@ -126,6 +126,16 @@ class Package(Base):
     api_service_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     cost_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)  # provider's rate, for margin reference
 
+    # --- catalog import / automatic pricing (services/catalog.py) -------------------------------
+    # auto_price=True: the selling price is recomputed from the provider's live cost
+    #   price = src_cost × exchange-rate  +  markup   (markup_type PERCENT|FIXED)
+    src_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)   # provider cost, 4 decimals
+    auto_price: Mapped[bool] = mapped_column(Boolean, default=False)
+    markup_type: Mapped[str | None] = mapped_column(String(8), nullable=True)         # PERCENT | FIXED
+    markup_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    src_game_id: Mapped[int | None] = mapped_column(Integer, nullable=True)           # where it was imported from,
+    src_category_id: Mapped[int | None] = mapped_column(Integer, nullable=True)       # used to refresh prices cheaply
+
     api_provider: Mapped["ApiProvider | None"] = relationship(back_populates="packages")
     orders: Mapped[list["Order"]] = relationship(back_populates="package")
 

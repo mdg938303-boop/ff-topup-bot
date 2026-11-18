@@ -49,6 +49,12 @@ def _normalize_status(raw: str) -> str:
     return STATUS_PROCESSING  # pending, processing, in_progress, awaiting, ...
 
 
+def _as_int(value):
+    """Epinby expects product_id as an integer; ids are stored as text in our database."""
+    text = str(value).strip()
+    return int(text) if text.isdigit() else value
+
+
 def _is_definitive_http_error(status: int) -> bool:
     return 400 <= status < 500 and status != 408
 
@@ -65,11 +71,14 @@ class EpinbyClient:
     def _headers(self) -> dict[str, str]:
         return {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
 
-    async def _request(self, method: str, path: str, json_body: dict | None = None) -> dict[str, Any]:
+    async def _request(
+        self, method: str, path: str, json_body: dict | None = None,
+        params: dict | None = None, headers: dict | None = None,
+    ) -> dict[str, Any]:
         url = f"{self.base_url}{path}"
         try:
             async with aiohttp.ClientSession(timeout=self.timeout, headers=self._headers()) as http:
-                async with http.request(method, url, json=json_body) as resp:
+                async with http.request(method, url, json=json_body, params=params, headers=headers) as resp:
                     status = resp.status
                     text = await resp.text()
         except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
@@ -95,21 +104,72 @@ class EpinbyClient:
 
     async def validate_player(self, product_id: str, player_id: str, server_id: str | None = None) -> dict[str, Any]:
         """Optional: validates a Player ID and returns the nickname (Epinby-specific)."""
-        body: dict[str, Any] = {"product_id": product_id, "player_id": player_id}
+        body: dict[str, Any] = {"product_id": _as_int(product_id), "player_id": player_id}
         if server_id:
             body["server_id"] = server_id
         result = await self._request("POST", "/validate-player", body)
         return result.get("data", result)
 
-    async def add_order(self, product_id: str, player_id: str, quantity: int = 1) -> str:
-        body = {"product_id": product_id, "qty": quantity, "player_id": player_id}
-        result = await self._request("POST", "/order", body)
+    async def add_order(self, product_id: str, player_id: str, quantity: int = 1, idempotency_key: str | None = None) -> str:
+        # Epinby docs: "X-Idempotency-Key is required on every order request". The same key + same
+        # payload safely returns the existing order, so a retry can never double-order.
+        body = {"product_id": _as_int(product_id), "qty": quantity, "player_id": player_id}
+        headers = {"X-Idempotency-Key": idempotency_key} if idempotency_key else None
+        result = await self._request("POST", "/order", body, headers=headers)
         data = result.get("data", result)
         order_id = data.get("order_id") or data.get("id") if isinstance(data, dict) else None
         if not order_id:
             # HTTP 200 but no order id: the order MAY exist -> unknown outcome, not "rejected".
             raise ApiClientError(f"Unexpected order response: {str(result)[:200]}")
         return str(order_id)
+
+    # ---------------- catalog (games -> categories -> products) ----------------
+    async def list_games(self) -> list[dict[str, Any]]:
+        result = await self._request("GET", "/games")
+        return [{"id": int(g["id"]), "name": str(g.get("name", ""))} for g in (result.get("data") or []) if "id" in g]
+
+    async def list_categories(self, game_id: int) -> list[dict[str, Any]]:
+        result = await self._request("GET", "/categories", params={"game_id": game_id})
+        return [{"id": int(c["id"]), "name": str(c.get("name", ""))} for c in (result.get("data") or []) if "id" in c]
+
+    async def list_products(
+        self, game_id: int | None = None, category_id: int | None = None, product_type: str = "topup",
+        game: str | None = None, category: str | None = None, max_pages: int = 10,
+    ) -> list[dict[str, Any]]:
+        """All matching products (follows pagination, 100 per page). price = Decimal in the account currency (USD)."""
+        from decimal import Decimal, InvalidOperation
+
+        products: list[dict[str, Any]] = []
+        page = 1
+        while page <= max_pages:
+            params: dict[str, Any] = {"type": product_type, "per_page": 100, "page": page}
+            if game_id:
+                params["game_id"] = game_id
+            if category_id:
+                params["category_id"] = category_id
+            if game:
+                params["game"] = game
+            if category:
+                params["category"] = category
+            result = await self._request("GET", "/products", params=params)
+            for item in result.get("data") or []:
+                try:
+                    price = Decimal(str(item.get("price")))
+                    if not price.is_finite() or price < 0:
+                        continue
+                    products.append({
+                        "id": int(item["id"]), "name": str(item.get("name", "")), "price": price,
+                        "game_id": int(item.get("game_id") or 0), "game": str(item.get("game") or ""),
+                        "category_id": int(item.get("category_id") or 0), "category": str(item.get("category") or ""),
+                        "stock_status": str(item.get("stock_status") or ""), "stock_count": item.get("stock_count"),
+                    })
+                except (InvalidOperation, KeyError, TypeError, ValueError):
+                    continue
+            meta = result.get("meta") or {}
+            if page >= int(meta.get("last_page") or 1):
+                break
+            page += 1
+        return products
 
     async def get_status(self, order_id: str) -> dict[str, Any]:
         result = await self._request("GET", f"/order/{order_id}")
@@ -157,7 +217,7 @@ class SmmGenericClient:
             raise ApiClientError(str(result["error"]))
         return result
 
-    async def add_order(self, service_id: str, player_id: str, quantity: int = 1) -> str:
+    async def add_order(self, service_id: str, player_id: str, quantity: int = 1, idempotency_key: str | None = None) -> str:
         result = await self._post({"action": "add", "service": service_id, "link": player_id, "quantity": quantity})
         if "error" in result:
             raise ApiRejectedError(str(result["error"]))

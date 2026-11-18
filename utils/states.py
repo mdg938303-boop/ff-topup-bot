@@ -69,3 +69,10 @@ class AdminMrAiPayFlow(StatesGroup):
     waiting_api_key = State()
     waiting_secret_key = State()
     waiting_brand_key = State()
+
+
+class AdminImportFlow(StatesGroup):
+    waiting_game = State()     # admin types a game name to search the provider catalog
+    browsing = State()         # picking products from a category
+    waiting_rate = State()     # exchange rate (provider currency -> BDT)
+    waiting_markup = State()   # profit: "10%" or "15"
